@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { PRODUCTS } from "../../../constants";
 
+// Helper to generate the system instruction from product data
 const getSystemInstruction = () => {
   const productContext = PRODUCTS.map(p => 
     `- ${p.name} ($${p.price}): ${p.description}. Features: ${p.features.join(', ')}`
@@ -20,24 +21,40 @@ const getSystemInstruction = () => {
 
 export async function POST(req: Request) {
   try {
+    // 1. Validate API Key existence on the server
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
-      console.error("API_KEY is not defined in the environment variables.");
-      return NextResponse.json({ error: "Configuration Error" }, { status: 500 });
+      console.error("Server Error: API_KEY is missing in environment variables.");
+      return NextResponse.json(
+        { error: "Server Configuration Error: API Key missing." }, 
+        { status: 500 }
+      );
     }
 
-    const { history, newMessage } = await req.json();
+    // 2. Parse request body
+    const body = await req.json();
+    const { history, newMessage } = body;
 
+    if (!newMessage) {
+      return NextResponse.json(
+        { error: "Bad Request: Message is required." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Initialize Gemini Client
     const ai = new GoogleGenAI({ apiKey });
     
-    // Construct the chat history for the Gemini SDK
-    // The history should contain previous turns. 
-    // The newMessage is sent via sendMessage, not added to history here manually.
-    const chatHistory = history.map((h: { role: string; text: string }) => ({
-      role: h.role,
-      parts: [{ text: h.text }]
-    }));
+    // 4. Transform client-side history to Gemini SDK format
+    // Ensure history is an array and map strictly to the expected format
+    const chatHistory = Array.isArray(history) 
+      ? history.map((h: { role: string; text: string }) => ({
+          role: h.role,
+          parts: [{ text: h.text }]
+        }))
+      : [];
 
+    // 5. Create Chat Session
     const chat = ai.chats.create({
       model: 'gemini-2.5-flash',
       config: {
@@ -46,14 +63,16 @@ export async function POST(req: Request) {
       history: chatHistory
     });
 
+    // 6. Send Message
     const result = await chat.sendMessage({ message: newMessage });
     
+    // 7. Return response
     return NextResponse.json({ text: result.text });
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("Gemini API Route Error:", error);
     return NextResponse.json(
-      { error: "Failed to generate response" }, 
+      { error: "Failed to process chat request." }, 
       { status: 500 }
     );
   }
